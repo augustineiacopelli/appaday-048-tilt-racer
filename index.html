@@ -73,10 +73,12 @@ html,body { width:100%;height:100%;background:var(--black);overflow:hidden;
 .name-input:focus { border-color:var(--neon); }
 
 /* HUD */
-#hud { position:fixed;top:0;left:0;right:0;pointer-events:none;z-index:5; }
+#hud { position:fixed;top:0;left:0;right:0;pointer-events:none;z-index:5;
+  background:linear-gradient(to bottom,rgba(8,8,16,.88) 0%,rgba(8,8,16,.0) 100%); }
 #hud.hidden { display:none; }
 .hud-top { display:flex;justify-content:space-between;align-items:flex-start;
-  padding:max(14px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) 12px max(18px,env(safe-area-inset-left)); }
+  padding:calc(env(safe-area-inset-top,0px) + 52px) max(20px,env(safe-area-inset-right,20px))
+          10px max(20px,env(safe-area-inset-left,20px)); }
 .hud-block { display:flex;flex-direction:column;align-items:center; }
 .hud-label { font-family:'Orbitron',monospace;font-size:.48rem;letter-spacing:.2em;
   color:rgba(0,245,196,.5);text-transform:uppercase;margin-bottom:2px; }
@@ -92,7 +94,8 @@ html,body { width:100%;height:100%;background:var(--black);overflow:hidden;
   background:var(--hot);border-radius:2px;transform:translateX(-50%); }
 
 /* Position strip */
-#posStrip { background:rgba(0,0,0,.55);padding:4px 18px;
+#posStrip { background:rgba(0,0,0,.55);
+  padding:4px max(18px,env(safe-area-inset-right,18px)) 4px max(18px,env(safe-area-inset-left,18px));
   display:flex;justify-content:space-between;align-items:center; }
 .pos-label { font-family:'Orbitron',monospace;font-size:.5rem;
   letter-spacing:.15em;color:rgba(255,255,255,.4); }
@@ -895,24 +898,74 @@ document.getElementById('saveScoreBtn').addEventListener('click',()=>{
 });
 
 // ============================================================
-// COLLISION CHECK (player vs opponents)
+// COLLISION SYSTEM — physics-differentiated
 // ============================================================
-function checkCollisions(){
-  if(spinning) return;
-  for(const o of opponents){
-    if(o.spinout) continue;
-    const dx=Math.abs(o.mesh.position.x-playerCar.position.x);
-    const dz=Math.abs(o.mesh.position.z-playerCar.position.z);
-    if(dx<1.2&&dz<2.6){ triggerSpinout(); return; }
-  }
-}
+// Contact types based on relative position:
+//   SIDE  : cars are beside each other (similar Z, offset X)  → bump sideways
+//   CORNER: player clipping past rear corner of opponent       → both spin
+//   REAREND: opponent plows into player's rear                 → player pushed, opp spins
 
-function triggerSpinout(){
+function triggerPlayerSpinout(){
+  if(spinning) return;
   spinning=true; spinTimer=SPIN_DUR; spinouts++;
   spinAngle=playerCar.rotation.y;
-  playerSpeed*=.1;
+  playerSpeed*=.08;
   spinBanner.classList.add('show');
   setTimeout(()=>spinBanner.classList.remove('show'),1800);
+}
+
+function triggerOpponentSpinout(o){
+  o.spinout=true;
+  o.spinTimer=1.4+Math.random()*.6;
+  o.speed*=.05;
+}
+
+function checkCollisions(){
+  for(const o of opponents){
+    if(!o.mesh.visible) continue;
+
+    const px=playerCar.position.x, pz=playerCar.position.z;
+    const ox=o.mesh.position.x,   oz=o.mesh.position.z;
+    const dx=px-ox;   // positive = player is to the right of opponent
+    const dz=pz-oz;   // positive = player is ahead of opponent
+
+    const HIT_X=1.25, HIT_Z=2.5;
+    if(Math.abs(dx)>=HIT_X || Math.abs(dz)>=HIT_Z) continue; // no contact
+
+    // Determine contact type from relative positions
+    const absDx=Math.abs(dx), absDz=Math.abs(dz);
+
+    if(absDx > absDz * 1.1){
+      // ── SIDE SWIPE: cars side-by-side, more lateral than longitudinal ──
+      // Push player away from opponent laterally, slight speed penalty
+      if(!spinning){
+        const pushDir = dx > 0 ? 1 : -1;
+        playerX += pushDir * 1.8;
+        playerSpeed = Math.max(playerSpeed * 0.82, 10);
+      }
+      // Push opponent the other way
+      if(!o.spinout){
+        const oppPush = dx > 0 ? -1 : 1;
+        o.mesh.position.x += oppPush * 1.2;
+        o.speed *= 0.88;
+      }
+
+    } else if(dz > 0.4){
+      // ── REAR-END: opponent behind player hits player's back ──
+      // Player gets nudged forward, opponent bounces back / spins
+      if(!spinning){
+        playerSpeed=Math.min(playerSpeed*1.12, PLAYER_TOP_SPEED);
+        playerX += dx * 0.3; // slight lateral deflection
+      }
+      if(!o.spinout) triggerOpponentSpinout(o);
+
+    } else {
+      // ── CORNER CLIP: player clipping past opponent's rear corner ──
+      // Both spin out
+      if(!o.spinout) triggerOpponentSpinout(o);
+      if(!spinning)  triggerPlayerSpinout();
+    }
+  }
 }
 
 // ============================================================
@@ -1001,8 +1054,10 @@ function loop(now){
     playerSpeed=Math.min(PLAYER_TOP_SPEED, playerSpeed+ACCEL*dt);
     // Steer — follow road curve
     const roadCenter=getXAt(-playerDist);
-    const halfW=ROAD_W/2-.95;
+    const halfW=ROAD_W/2-1.1;   // tighter — keep car fully on tarmac
     playerX=Math.max(roadCenter-halfW,Math.min(roadCenter+halfW, playerX+tiltX*7*dt));
+    // Also clamp after lateral collision push
+    playerX=Math.max(roadCenter-halfW,Math.min(roadCenter+halfW, playerX));
     playerCar.rotation.z=-tiltX*.1;
     playerCar.rotation.y=-tiltX*.07;
   }
@@ -1055,12 +1110,7 @@ function loop(now){
         if(p&&p.radiusTop>.2) ch.rotation.x=wheelRot*(o.speed/playerSpeed||1);
       }
     });
-    // Opponent vs player collision (can trigger player spinout)
-    if(!spinning&&o.mesh.visible){
-      const dx=Math.abs(o.mesh.position.x-playerCar.position.x);
-      const dz=Math.abs(o.mesh.position.z-playerCar.position.z);
-      if(dx<1.2&&dz<2.6) triggerSpinout();
-    }
+    // Collision handled centrally in checkCollisions()
     // Opponent vs opponent gentle nudge
     opponents.forEach(o2=>{
       if(o2===o) return;
