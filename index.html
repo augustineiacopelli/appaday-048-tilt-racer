@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Tilt Racer &mdash; AppADay 048</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600&display=swap" rel="stylesheet">
@@ -75,7 +75,8 @@ html,body { width:100%;height:100%;background:var(--black);overflow:hidden;
 /* HUD */
 #hud { position:fixed;top:0;left:0;right:0;pointer-events:none;z-index:5; }
 #hud.hidden { display:none; }
-.hud-top { display:flex;justify-content:space-between;align-items:flex-start;padding:12px 18px; }
+.hud-top { display:flex;justify-content:space-between;align-items:flex-start;
+  padding:max(14px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) 12px max(18px,env(safe-area-inset-left)); }
 .hud-block { display:flex;flex-direction:column;align-items:center; }
 .hud-label { font-family:'Orbitron',monospace;font-size:.48rem;letter-spacing:.2em;
   color:rgba(0,245,196,.5);text-transform:uppercase;margin-bottom:2px; }
@@ -129,7 +130,29 @@ html,body { width:100%;height:100%;background:var(--black);overflow:hidden;
 .go-new   { font-family:'Orbitron',monospace;font-size:.72rem;color:var(--hot);
   letter-spacing:.15em;margin-bottom:10px; }
 
-#backLink { position:fixed;bottom:10px;right:14px;font-size:.62rem;
+/* Countdown overlay */
+#countdown { position:fixed;inset:0;display:flex;align-items:center;
+  justify-content:center;z-index:20;pointer-events:none;background:rgba(0,0,0,.55); }
+#countdown.hidden { display:none; }
+#countdownNum { font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(5rem,28vw,10rem);letter-spacing:.02em;
+  text-shadow:0 0 40px currentColor;
+  animation:cdPop .55s ease-out forwards; }
+#countdownNum.go { color:var(--neon); }
+#countdownNum.num { color:var(--white); }
+@keyframes cdPop {
+  0%   { transform:scale(1.8); opacity:0; }
+  30%  { transform:scale(1.0); opacity:1; }
+  75%  { transform:scale(1.0); opacity:1; }
+  100% { transform:scale(.7);  opacity:0; }
+}
+
+/* Tilt permission note */
+#tiltNote { font-family:'Orbitron',monospace;font-size:.6rem;letter-spacing:.14em;
+  color:rgba(0,245,196,.45);margin-top:10px;min-height:1.4em; }
+
+#backLink { position:fixed;bottom:max(10px,env(safe-area-inset-bottom));
+  right:max(14px,env(safe-area-inset-right));font-size:.62rem;
   color:rgba(240,240,240,.18);text-decoration:none;z-index:5; }
 #backLink:hover { color:var(--neon); }
 </style>
@@ -148,10 +171,11 @@ html,body { width:100%;height:100%;background:var(--black);overflow:hidden;
   </div>
   <div id="tabPlay">
     <p style="font-size:.82rem;color:var(--dim);margin-bottom:8px;max-width:280px;line-height:1.6;">
-      Race 1500m against 7 opponents.<br>Tilt to steer. Spin-outs cost time, not the race.</p>
+      Race 6,000m against 7 opponents.<br>Tilt to steer. Spin-outs cost time, not the race.</p>
     <p style="font-family:'Orbitron',monospace;font-size:.65rem;color:rgba(0,245,196,.45);
       letter-spacing:.12em;margin-bottom:22px;">BEST TIME WINS</p>
     <button class="btn" id="startBtn">START RACE</button>
+    <div id="tiltNote"></div>
   </div>
   <div id="tabGarage" class="hidden">
     <div class="section-title">Choose Your Ride</div>
@@ -201,11 +225,14 @@ html,body { width:100%;height:100%;background:var(--black);overflow:hidden;
   </div>
   <div id="posStrip">
     <span class="pos-label">START</span>
-    <span class="pos-value" style="font-size:.65rem;color:var(--dim);" id="distLabel">0 / 1500m</span>
+    <span class="pos-value" style="font-size:.65rem;color:var(--dim);" id="distLabel">0 / 6,000m</span>
     <span class="pos-label">FINISH</span>
   </div>
 </div>
 
+<div id="countdown" class="hidden">
+  <span id="countdownNum" class="num">3</span>
+</div>
 <div id="spinBanner">SPIN OUT!</div>
 <div id="finishBanner">FINISH!</div>
 <div id="speedBar"><div id="speedFill"></div></div>
@@ -284,11 +311,11 @@ window.addEventListener('resize',resize);
 // ============================================================
 // ROAD / CURVE
 // ============================================================
-const RACE_DIST  = 1500;   // metres (world units)
+const RACE_DIST  = 6000;   // metres (world units)
 const SEG_LEN    = 8;
 const SEG_COUNT  = Math.ceil(RACE_DIST/SEG_LEN)+20;
 const ROAD_W     = 11;
-const VIS_SEGS   = 50;    // how many segments rendered at once
+const VIS_SEGS   = 70;    // how many segments rendered at once
 
 // Generate full course curve up front
 const curveX = [];        // lateral centre offset per segment
@@ -684,17 +711,35 @@ document.getElementById('clearScoresBtn').addEventListener('click',()=>{
 // ============================================================
 let tiltX=0, usingKeyboard=false, keys={};
 function handleOrientation(e){ tiltX=Math.max(-1,Math.min(1,(e.gamma||0)/28)); }
+let tiltGranted = false;
+const tiltNoteEl = document.getElementById('tiltNote');
+
 function requestTilt(){
-  if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+  if(tiltGranted) return;
+  if(typeof DeviceOrientationEvent!=='undefined' &&
+     typeof DeviceOrientationEvent.requestPermission==='function'){
     DeviceOrientationEvent.requestPermission().then(r=>{
-      if(r==='granted')window.addEventListener('deviceorientation',handleOrientation);
-    }).catch(()=>{});
+      if(r==='granted'){
+        window.addEventListener('deviceorientation',handleOrientation);
+        tiltGranted=true;
+        if(tiltNoteEl) tiltNoteEl.textContent='TILT ACTIVE';
+      } else {
+        if(tiltNoteEl) tiltNoteEl.textContent='PERMISSION DENIED — USE KEYBOARD';
+      }
+    }).catch(()=>{
+      if(tiltNoteEl) tiltNoteEl.textContent='TILT UNAVAILABLE — USE KEYBOARD';
+    });
   } else {
+    // Non-iOS or already available without permission
     window.addEventListener('deviceorientation',handleOrientation);
+    tiltGranted=true;
   }
 }
 window.addEventListener('keydown',e=>{keys[e.key]=true;usingKeyboard=true;});
 window.addEventListener('keyup',  e=>{keys[e.key]=false;});
+
+// Request tilt on first user interaction with the start button
+// (iOS requires a user gesture — the START RACE tap counts)
 
 // ============================================================
 // GAME STATE
@@ -737,39 +782,73 @@ function getPlayerPlace(){
   return ahead+1;
 }
 
-function startRace(){
+function resetGrid(){
   playerDist=0; playerSpeed=0; playerX=0; elapsed=0;
   spinouts=0; spinning=false; spinTimer=0; spinAngle=0;
   wheelRot=0; finishShown=false;
-  playerCar.position.z=4; playerCar.rotation.y=0; playerCar.rotation.z=0;
+  playerCar.position.set(0,0,4);
+  playerCar.rotation.y=0; playerCar.rotation.z=0;
 
-  // Reset and stagger opponents on grid
   const gridSpacing=10;
   opponents.forEach((o,i)=>{
-    o.dist=-(i+1)*gridSpacing; // staggered BEHIND start by spacing
-    // each opponent has unique character: some fast starters, some slow
+    o.dist=-(i+1)*gridSpacing;
     const personality=.78+Math.random()*.38;
     o.baseSpeed=PLAYER_TOP_SPEED*personality;
     o.speed=o.baseSpeed*.3;
     o.lane=i%3;
     o.laneChangeTimer=2+Math.random()*4;
     o.spinout=false; o.spinTimer=0;
-    // Place on grid
-    const worldZ=4-(-o.dist); // they start behind player
+    const worldZ=4-(-o.dist);
     const cx=getXAt(worldZ);
     o.mesh.position.set(cx+LANE_X[o.lane],0,worldZ);
-    o.mesh.rotation.y=0;o.mesh.rotation.z=0;
+    o.mesh.rotation.y=0; o.mesh.rotation.z=0;
     o.mesh.visible=true;
   });
+}
 
+function runCountdown(cb){
+  const overlay = document.getElementById('countdown');
+  const numEl   = document.getElementById('countdownNum');
+  overlay.classList.remove('hidden');
+  const steps = ['3','2','1','GO!'];
+  let i = 0;
+  function tick(){
+    const val = steps[i];
+    numEl.textContent = val;
+    numEl.className   = val==='GO!' ? 'go' : 'num';
+    // restart animation
+    numEl.style.animation='none';
+    void numEl.offsetWidth; // reflow
+    numEl.style.animation='';
+    i++;
+    if(i < steps.length){
+      setTimeout(tick, 900);
+    } else {
+      setTimeout(()=>{
+        overlay.classList.add('hidden');
+        cb();
+      }, 650);
+    }
+  }
+  tick();
+}
+
+function startRace(){
+  requestTilt();  // ensure tilt is active (iOS: this tap is the gesture)
+  resetGrid();
   spinBanner.classList.remove('show');
   finishBanner.classList.remove('show');
   startScreen.classList.add('hidden');
   gameOverScreen.classList.add('hidden');
   hud.classList.remove('hidden');
-  state='racing'; lastTime=null;
+  state='grid';   // frozen — loop won't advance elapsed/dist during countdown
+  lastTime=null;
   if(animId) cancelAnimationFrame(animId);
-  loop(0);
+  loop(0);        // start rendering the grid scene immediately
+  runCountdown(()=>{
+    state='racing';
+    lastTime=null;  // reset dt to avoid a spike on first racing frame
+  });
 }
 
 function endRace(){
@@ -799,8 +878,8 @@ function showResults(){
   document.getElementById('saveScoreBtn').disabled=false;
 }
 
-document.getElementById('startBtn').addEventListener('click',()=>{ requestTilt(); startRace(); });
-document.getElementById('retryBtn').addEventListener('click',()=>{ requestTilt(); startRace(); });
+document.getElementById('startBtn').addEventListener('click',()=>{ startRace(); });
+document.getElementById('retryBtn').addEventListener('click',()=>{ startRace(); });
 document.getElementById('menuBtn').addEventListener('click',()=>{
   gameOverScreen.classList.add('hidden');
   startScreen.classList.remove('hidden');
@@ -878,6 +957,16 @@ function loop(now){
     camera.position.x=Math.sin(now*.0003)*1.2;
     camera.position.y=4.2+Math.sin(now*.0005)*.25;
     camera.lookAt(0, 0.8, camera.position.z - 30);
+    renderer.render(scene,camera);
+    return;
+  }
+
+  if(state==='grid'){
+    // Countdown active — render the starting grid, camera on car, no movement
+    camera.position.x = playerCar.position.x;
+    camera.position.z = playerCar.position.z + 9.5;
+    camera.position.y = 4.2;
+    camera.lookAt(playerCar.position.x, 0.8, playerCar.position.z - 22);
     renderer.render(scene,camera);
     return;
   }
@@ -987,14 +1076,12 @@ function loop(now){
   // ---- ROAD UPDATE ----
   updateRoad(playerWorldZ);
 
-  // ---- CAMERA follows player ----
-  const targetCamX = playerX * 0.38;
-  camera.position.x += (targetCamX - camera.position.x) * 0.1;
-  camera.position.z = playerWorldZ + 9;   // always 9 units behind car
-  if(spinning) camera.position.y = 4.2 + Math.sin(elapsed*12) * 0.05;
-  else camera.position.y = 4.2;
-  camera.lookAt(playerX * 0.25, 0.8, playerWorldZ - 20);
-  neonFill.position.set(playerX, 4, playerWorldZ + 5);
+  // ---- CAMERA: rigidly locked to car, moves with it exactly ----
+  camera.position.x = playerCar.position.x;           // exact — no lerp, no fraction
+  camera.position.z = playerCar.position.z + 9.5;     // always 9.5 behind car
+  camera.position.y = spinning ? 4.2 + Math.sin(elapsed*12)*0.05 : 4.2;
+  camera.lookAt(playerCar.position.x, 0.8, playerCar.position.z - 22);
+  neonFill.position.set(playerCar.position.x, 4, playerCar.position.z + 5);
   neonFill.intensity=1.2+Math.sin(elapsed*6)*.12;
 
   // ---- HUD ----
