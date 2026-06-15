@@ -383,7 +383,7 @@ const poleGeo=new THREE.CylinderGeometry(.055,.075,5,6);
 const poleMat=new THREE.MeshLambertMaterial({color:0x334455});
 const headGeo=new THREE.BoxGeometry(.38,.14,.75);
 const headMat=new THREE.MeshBasicMaterial({color:0xffeebb});
-for(let i=0;i<SEG_COUNT;i+=3){
+for(let i=0;i<SEG_COUNT;i+=4){
   const cx=curveX[Math.min(SEG_COUNT-1,i)]||0;
   const z=segZ(i);
   [-1,1].forEach(side=>{
@@ -877,7 +877,7 @@ function loop(now){
     // Idle: slow road drift
     camera.position.x=Math.sin(now*.0003)*1.2;
     camera.position.y=4.2+Math.sin(now*.0005)*.25;
-    camera.lookAt(0, 0.8, -30);
+    camera.lookAt(0, 0.8, camera.position.z - 30);
     renderer.render(scene,camera);
     return;
   }
@@ -1006,7 +1006,7 @@ function loop(now){
   const pct=Math.min(100,playerDist/RACE_DIST*100);
   progressFill.style.width=pct+'%';
   progressPlayer.style.left=pct+'%';
-  distLabel.textContent=Math.min(Math.round(playerDist),RACE_DIST)+' / '+RACE_DIST+'m';
+  distLabel.textContent=Math.min(Math.round(playerDist),RACE_DIST).toLocaleString()+' / '+RACE_DIST.toLocaleString()+'m';
   speedFill.style.width=(playerSpeed/PLAYER_TOP_SPEED*100)+'%';
 
   // ---- FINISH CHECK ----
