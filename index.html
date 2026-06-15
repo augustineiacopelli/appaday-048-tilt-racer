@@ -840,13 +840,27 @@ function triggerSpinout(){
 // ROAD RECYCLER (keep VIS_SEGS around the player)
 // ============================================================
 function updateRoad(playerWorldZ){
-  // We want segments from (nearest behind) to (far ahead)
-  const nearestIdx=Math.max(0,Math.floor(-playerWorldZ/SEG_LEN)-2);
-  for(let s=0;s<VIS_SEGS;s++){
-    const targetIdx=nearestIdx+s;
-    if(targetIdx>=SEG_COUNT) break;
-    const pool=segPool[s];
-    if(pool.assignedIdx!==targetIdx) placeSegment(pool,targetIdx);
+  // Float VIS_SEGS segments around the player
+  const nearestIdx = Math.max(0, Math.floor(-playerWorldZ / SEG_LEN) - 3);
+  for(let s = 0; s < VIS_SEGS; s++){
+    const targetIdx = nearestIdx + s;
+    if(targetIdx >= SEG_COUNT) {
+      // Past finish — hide leftover pool slots
+      const pool = segPool[s];
+      if(pool.assignedIdx !== -99){
+        pool.road.position.y = -999;
+        pool.kL.position.y   = -999;
+        pool.kR.position.y   = -999;
+        pool.eL.position.y   = -999;
+        pool.eR.position.y   = -999;
+        pool.dA.position.y   = -999;
+        pool.dB.position.y   = -999;
+        pool.assignedIdx = -99;
+      }
+      continue;
+    }
+    const pool = segPool[s];
+    if(pool.assignedIdx !== targetIdx) placeSegment(pool, targetIdx);
   }
 }
 
@@ -863,7 +877,7 @@ function loop(now){
     // Idle: slow road drift
     camera.position.x=Math.sin(now*.0003)*1.2;
     camera.position.y=4.2+Math.sin(now*.0005)*.25;
-    camera.lookAt(0,.8,-15);
+    camera.lookAt(0, 0.8, -30);
     renderer.render(scene,camera);
     return;
   }
@@ -973,13 +987,14 @@ function loop(now){
   // ---- ROAD UPDATE ----
   updateRoad(playerWorldZ);
 
-  // ---- CAMERA ----
-  const targetCamX=playerX*.38;
-  camera.position.x+=(targetCamX-camera.position.x)*.1;
-  if(spinning) camera.position.y=4.2+Math.sin(elapsed*12)*.05;
-  else camera.position.y=4.2;
-  camera.lookAt(playerX*.25,.8,playerWorldZ-20);
-  neonFill.position.set(playerX,4,playerWorldZ+5);
+  // ---- CAMERA follows player ----
+  const targetCamX = playerX * 0.38;
+  camera.position.x += (targetCamX - camera.position.x) * 0.1;
+  camera.position.z = playerWorldZ + 9;   // always 9 units behind car
+  if(spinning) camera.position.y = 4.2 + Math.sin(elapsed*12) * 0.05;
+  else camera.position.y = 4.2;
+  camera.lookAt(playerX * 0.25, 0.8, playerWorldZ - 20);
+  neonFill.position.set(playerX, 4, playerWorldZ + 5);
   neonFill.intensity=1.2+Math.sin(elapsed*6)*.12;
 
   // ---- HUD ----
